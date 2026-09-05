@@ -1,0 +1,93 @@
+<dashboard>
+  <label>LeRobot SO-101 Telemetry</label>
+  <description>Real-time telemetry from LeRobot SO-101 robot arm via ROS2 → Splunk HEC</description>
+  <refresh>5s</refresh>
+  <panel title="Joint Positions Over Time">
+    <table>
+      <title>Current Joint Positions</title>
+      <search>
+        <query>
+          index=lerobot_telemetry sourcetype=lerobot:telemetry event_type=robot_step
+          | table _time episode step shoulder_pan shoulder_lift elbow_flex wrist_flex wrist_roll gripper
+          | sort -_time
+          | head 1
+        </query>
+        <done>
+          <set token="last_step">$result.steps$</set>
+          <set token="last_ep">$result.episode$</set>
+        </done>
+      </search>
+      <option name="drilldown">none</option>
+      <option name="refresh.line">true</option>
+      <option name="refresh.display">progressbar</option>
+    </table>
+  </panel>
+
+  <panel title="Policy Performance">
+    <table>
+      <title>Policy FPS & Latency</title>
+      <search>
+        <query>
+          index=lerobot_telemetry sourcetype=lerobot:telemetry event_type=robot_step
+          | stats avg(policy_fps) as avg_fps avg(inference_latency_ms) as avg_latency by episode
+          | sort -avg_fps
+        </query>
+      </search>
+      <option name="drilldown">none</option>
+      <option name="refresh.line">true</option>
+      <option name="numrows">5</option>
+    </table>
+  </panel>
+
+  <panel title="System Resource Utilization">
+    <chart>
+      <search>
+        <query>
+          index=lerobot_telemetry sourcetype=lerobot:telemetry event_type=system_stats
+          | timechart span=30s avg(cpu_percent) as CPU avg(gpu_util_percent) as GPU_P95
+        </query>
+      </search>
+      <option name="refresh.display">progressbar</option>
+      <option name="charting.axisX.title">Time</option>
+      <option name="charting.axisY.title">Percentage</option>
+    </chart>
+  </panel>
+
+  <panel title="Gripper State & Violations">
+    <table>
+      <title>Gripper & Safety Violations</title>
+      <search>
+        <query>
+          index=lerobot_telemetry sourcetype=lerobot:telemetry event_type=robot_step
+          | mvexpand joint_violations
+          | table _time episode step motor position min max
+          | where isnotnull(motor)
+          | sort -_time
+          | head 10
+        </query>
+      </search>
+      <option name="drilldown">none</option>
+      <option name="refresh.line">true</option>
+    </table>
+  </panel>
+
+  <panel title="Gripper Position">
+    <single>
+      <title>Gripper Position</title>
+      <search>
+        <query>
+          index=lerobot_telemetry sourcetype=lerobot:telemetry event_type=robot_step
+          | table _time gripper_position gripper_state
+          | sort -_time
+          | head 1
+        </query>
+      </search>
+      <option name="drilldown">none</option>
+      <option>Value</option>
+      <option name="beforeLabel">mm</option>
+      <option name="label">Gripper</option>
+      <option name="useThousandSeparators">0</option>
+      <option name="unit">mm</option>
+    </single>
+  </panel>
+</dashboard>
