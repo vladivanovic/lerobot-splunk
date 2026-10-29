@@ -529,7 +529,9 @@ class AgentRuntime:
         if isinstance(chosen, GrootPolicyBackend):
             chosen.set_state(self.arm.read() if self.arm else {})
 
+        t0 = time.time()
         result = chosen.select_action(instruction)
+        latency_ms = round((time.time() - t0) * 1000.0, 2)
 
         # Per-chunk telemetry with robot observation
         joints = self.arm.read() if self.arm else {}
@@ -538,8 +540,8 @@ class AgentRuntime:
             joint_positions={m: round(joints.get(m, 0.0), 4) for m in MOTOR_NAMES if m in joints},
             gripper_position=joints.get("gripper"),
             action_vector=result.action_vector,
-            inference_latency_ms=None,
-            policy_fps=None,
+            inference_latency_ms=latency_ms,
+            policy_fps=round(1000.0 / latency_ms, 2) if latency_ms > 0 else None,
             joint_violations={},
         )
         self._emit("policy_step",

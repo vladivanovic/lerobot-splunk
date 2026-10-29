@@ -1,93 +1,260 @@
 <dashboard>
-  <label>LeRobot SO-101 Telemetry</label>
-  <description>Real-time telemetry from LeRobot SO-101 robot arm via ROS2 → Splunk HEC</description>
-  <refresh>5s</refresh>
-  <panel title="Joint Positions Over Time">
-    <table>
-      <title>Current Joint Positions</title>
-      <search>
-        <query>
-          index=lerobot_telemetry sourcetype=lerobot:telemetry event_type=robot_step
-          | table _time episode step shoulder_pan shoulder_lift elbow_flex wrist_flex wrist_roll gripper
-          | sort -_time
-          | head 1
-        </query>
-        <done>
-          <set token="last_step">$result.steps$</set>
-          <set token="last_ep">$result.episode$</set>
-        </done>
-      </search>
-      <option name="drilldown">none</option>
-      <option name="refresh.line">true</option>
-      <option name="refresh.display">progressbar</option>
-    </table>
-  </panel>
+  <label>LeRobot SO-101 Agent</label>
+  <description>SO-101 agent runtime: audio wake-word, policy inference (GR00T/scripted), arm telemetry — all via Splunk HEC</description>
+  <refresh>10s</refresh>
 
-  <panel title="Policy Performance">
-    <table>
-      <title>Policy FPS & Latency</title>
-      <search>
-        <query>
-          index=lerobot_telemetry sourcetype=lerobot:telemetry event_type=robot_step
-          | stats avg(policy_fps) as avg_fps avg(inference_latency_ms) as avg_latency by episode
-          | sort -avg_fps
-        </query>
-      </search>
-      <option name="drilldown">none</option>
-      <option name="refresh.line">true</option>
-      <option name="numrows">5</option>
-    </table>
-  </panel>
+  <!-- ═══════════════ ROW 1: voice chain ═══════════════ -->
 
-  <panel title="System Resource Utilization">
-    <chart>
-      <search>
-        <query>
-          index=lerobot_telemetry sourcetype=lerobot:telemetry event_type=system_stats
-          | timechart span=30s avg(cpu_percent) as CPU avg(gpu_util_percent) as GPU_P95
-        </query>
-      </search>
-      <option name="refresh.display">progressbar</option>
-      <option name="charting.axisX.title">Time</option>
-      <option name="charting.axisY.title">Percentage</option>
-    </chart>
-  </panel>
+  <row>
+    <panel>
+      <title>Voice → Action End-to-End Latency (per trigger)</title>
+      <chart>
+        <search>
+          <query>
+            index=lerobot_telemetry sourcetype=lerobot:telemetry
+            (event_type=audio_event OR event_type=instruction OR event_type=policy_step)
+            | transaction trigger_id maxspan=60s
+            | search event_count>=2
+            | eval e2e_s=round(duration, 2)
+            | timechart span=10m avg(e2e_s) as avg_e2e p95(e2e_s) as p95_e2e max(e2e_s) as max_e2e
+          </query>
+          <earliest>-24h@h</earliest>
+          <latest>now</latest>
+        </search>
+        <option name="charting.chart">line</option>
+        <option name="charting.axisY.title">seconds (speech → arm)</option>
+        <option name="charting.axisX.title">time</option>
+        <option name="refresh.display">progressbar</option>
+      </chart>
+    </panel>
 
-  <panel title="Gripper State & Violations">
-    <table>
-      <title>Gripper & Safety Violations</title>
-      <search>
-        <query>
-          index=lerobot_telemetry sourcetype=lerobot:telemetry event_type=robot_step
-          | mvexpand joint_violations
-          | table _time episode step motor position min max
-          | where isnotnull(motor)
-          | sort -_time
-          | head 10
-        </query>
-      </search>
-      <option name="drilldown">none</option>
-      <option name="refresh.line">true</option>
-    </table>
-  </panel>
+    <panel>
+      <table>
+        <title>Last 10 Voice Triggers (chain detail)</title>
+        <search>
+          <query>
+            index=lerobot_telemetry sourcetype=lerobot:telemetry
+            (event_type=audio_event OR event_type=instruction OR event_type=policy_step)
+            | transaction trigger_id maxspan=60s
+            | search event_count>=2
+            | eval latency_s=coalesce(round(inference_latency_ms/1000, 2), round(duration, 2))
+            | table _time trigger_id event_count duration policy_backend raw_message
+            | sort -_time
+            | head 10
+          </query>
+          <earliest>-24h@h</earliest>
+          <latest>now</latest>
+        </search>
+        <option name="drilldown">none</option>
+        <option name="refresh.display">progressbar</option>
+      </table>
+    </panel>
+  </row>
 
-  <panel title="Gripper Position">
-    <single>
-      <title>Gripper Position</title>
-      <search>
-        <query>
-          index=lerobot_telemetry sourcetype=lerobot:telemetry event_type=robot_step
-          | table _time gripper_position gripper_state
-          | sort -_time
-          | head 1
-        </query>
-      </search>
-      <option name="drilldown">none</option>
-      <option>Value</option>
-      <option name="beforeLabel">mm</option>
-      <option name="label">Gripper</option>
-      <option name="useThousandSeparators">0</option>
-      <option name="unit">mm</option>
-    </single>
-  </panel>
+  <row>
+    <panel>
+      <single>
+        <title>Wake-Word Hits (24h)</title>
+        <search>
+          <query>
+            index=lerobot_telemetry sourcetype=lerobot:telemetry event_type=audio_event stage=wake_word
+            | stats count
+          </query>
+          <earliest>-24h@h</earliest>
+          <latest>now</latest>
+        </search>
+        <option name="refresh.display">progressbar</option>
+        <option name="unit">hits</option>
+      </single>
+    </panel>
+
+    <panel>
+      <single>
+        <title>Instructions Executed (24h)</title>
+        <search>
+          <query>
+            index=lerobot_telemetry sourcetype=lerobot:telemetry event_type=instruction
+            | stats count
+          </query>
+          <earliest>-24h@h</earliest>
+          <latest>now</latest>
+        </search>
+        <option name="refresh.display">progressbar</option>
+        <option name="unit">commands</option>
+      </single>
+    </panel>
+
+    <panel>
+      <table>
+        <title>Instructions by Type (24h)</title>
+        <search>
+          <query>
+            index=lerobot_telemetry sourcetype=lerobot:telemetry event_type=policy_step
+            | stats count avg(inference_latency_ms) as avg_latency_ms by policy_backend task_instruction
+            | sort -count
+          </query>
+          <earliest>-24h@h</earliest>
+          <latest>now</latest>
+        </search>
+        <option name="drilldown">none</option>
+      </table>
+    </panel>
+  </row>
+
+  <!-- ═══════════════ ROW 2: policy performance ═══════════════ -->
+
+  <row>
+    <panel>
+      <chart>
+        <title>Policy Inference Latency Distribution (ms)</title>
+        <search>
+          <query>
+            index=lerobot_telemetry sourcetype=lerobot:telemetry event_type=policy_step inference_latency_ms=*
+            | timechart span=10m perc95(inference_latency_ms) as p95 avg(inference_latency_ms) as avg by policy_backend
+          </query>
+          <earliest>-24h@h</earliest>
+          <latest>now</latest>
+        </search>
+        <option name="charting.chart">line</option>
+        <option name="charting.axisY.title">ms</option>
+        <option name="refresh.display">progressbar</option>
+      </chart>
+    </panel>
+
+    <panel>
+      <chart>
+        <title>Commanded Action Dim 0 vs 1 by Instruction</title>
+        <search>
+          <query>
+            index=lerobot_telemetry sourcetype=lerobot:telemetry event_type=policy_step
+            | eval a0=mvindex(commanded_action, 0), a1=mvindex(commanded_action, 1)
+            | timechart span=10s avg(a0) as "dim0" avg(a1) as "dim1" by task_instruction
+          </query>
+          <earliest>-4h@h</earliest>
+          <latest>now</latest>
+        </search>
+        <option name="charting.chart">line</option>
+        <option name="refresh.display">progressbar</option>
+      </chart>
+    </panel>
+  </row>
+
+  <!-- ═══════════════ ROW 3: joint telemetry ═══════════════ -->
+
+  <row>
+    <panel>
+      <table>
+        <title>Current Joint Positions (latest robot_step)</title>
+        <search>
+          <query>
+            index=lerobot_telemetry sourcetype=lerobot:telemetry event_type=robot_step
+            | spath path=robot.joint_positions
+            | table _time robot.joint_positions.shoulder_pan robot.joint_positions.shoulder_lift robot.joint_positions.elbow_flex robot.joint_positions.wrist_flex robot.joint_positions.wrist_roll robot.joint_positions.gripper
+            | sort -_time
+            | head 1
+          </query>
+          <earliest>-15m</earliest>
+          <latest>now</latest>
+          <refresh>5s</refresh>
+          <refresh.type>timer</refresh.type>
+        </search>
+        <option name="drilldown">none</option>
+      </table>
+    </panel>
+
+    <panel>
+      <table>
+        <title>Joint Violations (safety)</title>
+        <search>
+          <query>
+            index=lerobot_telemetry sourcetype=lerobot:telemetry event_type=robot_step
+            | spath path=robot.joint_violations{}
+            | search robot.joint_violations{}.position=*
+            | table _time episode step robot.joint_violations{}.position robot.joint_violations{}.min robot.joint_violations{}.max
+            | sort -_time
+            | head 20
+          </query>
+          <earliest>-24h@h</earliest>
+          <latest>now</latest>
+        </search>
+        <option name="drilldown">none</option>
+        <option name="refresh.display">progressbar</option>
+      </table>
+    </panel>
+
+    <panel>
+      <single>
+        <title>Gripper Position</title>
+        <search>
+          <query>
+            index=lerobot_telemetry sourcetype=lerobot:telemetry event_type=robot_step
+            | spath path=robot.gripper_position
+            | table _time robot.gripper_position
+            | sort -_time
+            | head 1
+          </query>
+          <earliest>-15m</earliest>
+          <latest>now</latest>
+          <refresh>5s</refresh>
+          <refresh.type>timer</refresh.type>
+        </search>
+        <option name="unit">norm</option>
+        <option name="rangeValues">[0,100]</option>
+      </single>
+    </panel>
+  </row>
+
+  <!-- ═══════════════ ROW 4: system ═══════════════ -->
+
+  <row>
+    <panel>
+      <chart>
+        <title>System: CPU vs RAM</title>
+        <search>
+          <query>
+            index=lerobot_telemetry sourcetype=lerobot:telemetry event_type=system_stats
+            | timechart span=1m avg(cpu_percent) as CPU avg(ram_percent) as RAM
+          </query>
+          <earliest>-4h@h</earliest>
+          <latest>now</latest>
+        </search>
+        <option name="charting.chart">line</option>
+        <option name="charting.axisY.title">%</option>
+        <option name="refresh.display">progressbar</option>
+      </chart>
+    </panel>
+
+    <panel>
+      <chart>
+        <title>Runtime Process (this agent)</title>
+        <search>
+          <query>
+            index=lerobot_telemetry sourcetype=lerobot:telemetry event_type=system_stats
+            | timechart span=1m avg(process_cpu_percent) as agent_cpu avg(process_mem_mb) as agent_mem_mb
+          </query>
+          <earliest>-4h@h</earliest>
+          <latest>now</latest>
+        </search>
+        <option name="charting.chart">line</option>
+        <option name="refresh.display">progressbar</option>
+      </chart>
+    </panel>
+
+    <panel>
+      <event>
+        <title>Recent Events (raw stream)</title>
+        <search>
+          <query>
+            index=lerobot_telemetry sourcetype=lerobot:telemetry earliest=-15m
+            | fields _time event_type raw_message trigger_id
+            | sort -_time
+          </query>
+          <earliest>-15m</earliest>
+          <latest>now</latest>
+        </search>
+        <option name="list.drilldown">none</option>
+        <option name="refresh.display">progressbar</option>
+      </event>
+    </panel>
+  </row>
 </dashboard>
