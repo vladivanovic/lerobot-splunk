@@ -134,6 +134,31 @@ class RobotObservation:
 
 
 @dataclass
+class AudioEvent:
+    """Voice/audio pipeline telemetry (wake word, transcripts, instructions)."""
+    stage:            str    = ""    # partial_transcript | wake_word | instruction
+    transcript:       str    = ""
+    matched_phrase:   str    = ""
+    match_ratio:      float  = 0.0
+    rms:              float  = 0.0
+    threshold:        float  = 0.0
+    device:           str    = ""
+
+
+@dataclass
+class PolicyStepStats:
+    """Policy inference telemetry (backend-agnostic: GR00T, ACT, scripted, ...)."""
+    policy_backend:   str    = ""    # gr00t_n1_7 | scripted | act | ...
+    checkpoint:       str    = ""
+    embodiment_tag:   str    = ""
+    task_instruction: str    = ""
+    chunk_index:      int    = 0     # how many chunks predicted this episode
+    chunk_step:       int    = 0     # position within the current action chunk
+    raw_action:       list   = field(default_factory=list)       # policy output pre-normalization-removal
+    commanded_action: list   = field(default_factory=list)       # values actually sent to servos
+
+
+@dataclass
 class TelemetryEvent:
     timestamp_utc:   str
     epoch_ms:        int
@@ -144,6 +169,9 @@ class TelemetryEvent:
     system:          Optional[JetsonSystemStats] = None
     robot:           Optional[RobotObservation]  = None
     raw_message:     Optional[str]               = None
+    audio:           Optional[AudioEvent]        = None
+    policy:          Optional[PolicyStepStats]   = None
+    trigger_id:      Optional[str]               = None  # chains voice -> action
 
 
 # ─────────────────────────────────────────────────────────────
@@ -463,9 +491,11 @@ class JetsonStatsCollector:
 
 class SplunkHECSender:
     def __init__(self):
+        # Token precedence: SPLUNK_HEC_TOKEN env var > module constant (placeholder)
+        hec_token = os.environ.get("SPLUNK_HEC_TOKEN", SPLUNK_HEC_TOKEN)
         self._session = requests.Session()
         self._session.headers.update({
-            "Authorization": f"Splunk {SPLUNK_HEC_TOKEN}",
+            "Authorization": f"Splunk {hec_token}",
             "Content-Type":  "application/json",
         })
         self._queue: queue.Queue = queue.Queue(maxsize=1000)
